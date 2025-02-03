@@ -1,0 +1,56 @@
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'ANSIBLE_KEY_PATH', defaultValue: '/var/lib/jenkins/.ssh/id_rsa', description: 'Path to the Ansible private key file')
+        string(name: 'PLAYBOOK_PATH', defaultValue: '/var/lib/jenkins/workspace/pipe-terra/install_nginx.yaml', description: 'Path to the Ansible playbook file')
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'test', url: 'https://github.com/Manish172-hub/test_terraform_repo.git'
+            }
+        }
+        stage('Terraform Init') { // Move this stage inside the stages block
+            steps {
+                sh 'terraform init'
+            }
+        }
+        stage('Terraform Plan') {
+            steps {
+                sh 'terraform plan -out=myplan_$BUILD_NUMBER'
+            }
+        }
+        stage('Terraform Apply') {
+            steps {
+                sh 'terraform apply -input=false myplan_$BUILD_NUMBER'
+            }
+        }
+        stage('Extract Public IP') {
+            steps {
+                script {
+                    def publicIP = sh(
+                        script: "terraform output -raw mypublicIP",
+                        returnStdout: true
+                    ).trim()
+                    writeFile file: 'inventory.ini', text: "[ec2]\n${publicIP} ansible_user=ec2-user ansible_ssh_private_key_file=${params.ANSIBLE_KEY_PATH}"
+                }
+            }
+        }
+        
+        stage('Run Ansible Playbook') {
+            steps {
+                script {
+                    sh '''
+                    ansible-playbook -i inventory.ini \
+                    --private-key=${ANSIBLE_KEY_PATH}/id_rsa \
+                    ${PLAYBOOK_PATH}
+                    '''
+                }
+            }
+        }
+
+
+    }
+}
